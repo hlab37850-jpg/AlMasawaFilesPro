@@ -52,6 +52,10 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             Radio(R.string.sort_date, s.sortBy == SortBy.MODIFIED) { vm.sortBy(SortBy.MODIFIED) }
             SwitchRow(R.string.sort_asc, s.sortAsc, vm::sortAsc)
 
+            Section(R.string.settings_advanced)
+            SwitchRow(R.string.adv_dual, s.dualPane, vm::dualPane)
+            Text(stringResource(R.string.adv_dual_desc), style = MaterialTheme.typography.bodySmall)
+
             Section(R.string.settings_about)
             Text(stringResource(R.string.about_body, BuildConfig.VERSION_NAME), modifier = Modifier.padding(bottom = 24.dp))
         }

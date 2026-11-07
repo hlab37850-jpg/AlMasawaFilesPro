@@ -22,4 +22,5 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun showHidden(v: Boolean) { viewModelScope.launch { repo.setShowHidden(v) } }
     fun sortBy(s: SortBy) { viewModelScope.launch { repo.setSortBy(s) } }
     fun sortAsc(v: Boolean) { viewModelScope.launch { repo.setSortAsc(v) } }
+    fun dualPane(v: Boolean) { viewModelScope.launch { repo.setDualPane(v) } }
 }

@@ -8,97 +8,125 @@ import com.almasawa.files.R
 import com.almasawa.files.data.db.PanelDao
 import com.almasawa.files.data.db.PanelItemEntity
 import com.almasawa.files.data.db.PanelWithItems
-import com.almasawa.files.data.files.FileItem
 import com.almasawa.files.data.files.FileOpException
 import com.almasawa.files.data.files.FileRepository
-import com.almasawa.files.data.settings.AppSettings
+import com.almasawa.files.data.files.PaneModel
+import com.almasawa.files.data.files.TaskManager
+import com.almasawa.files.data.files.uniqueName
 import com.almasawa.files.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
-data class BrowserUi(
-    val path: String,
-    val items: List<FileItem> = emptyList(),
-    val loading: Boolean = true,
-    val error: Boolean = false,
-    val selection: Set<String> = emptySet(),
-    @StringRes val message: Int? = null,
-)
+data class TabsUi(val paths: List<String>, val index: Int)
 
 @HiltViewModel
 class BrowserViewModel @Inject constructor(
     handle: SavedStateHandle,
     private val repo: FileRepository,
-    settings: SettingsRepository,
+    private val settings: SettingsRepository,
     private val dao: PanelDao,
+    val tasks: TaskManager,
 ) : ViewModel() {
 
     val rootPath: String = repo.root.absolutePath
-    private val _ui = MutableStateFlow(
-        BrowserUi(path = handle.get<String>("path")?.takeIf { it.isNotBlank() } ?: rootPath),
-    )
-    val ui: StateFlow<BrowserUi> = _ui.asStateFlow()
+    val pane = PaneModel(viewModelScope, repo, rootPath)
+
+    private val _tabs = MutableStateFlow(TabsUi(listOf(rootPath), 0))
+    val tabs: StateFlow<TabsUi> = _tabs.asStateFlow()
+
+    private val _message = MutableStateFlow<Int?>(null)
+    val message: StateFlow<Int?> = _message.asStateFlow()
 
     val panels: StateFlow<List<PanelWithItems>> =
         dao.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private var cfg = AppSettings()
-    private var job: Job? = null
+    val dualPane: StateFlow<Boolean> =
+        settings.flow.map { it.dualPane }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    private var started = false
 
     init {
-        viewModelScope.launch { settings.flow.collect { cfg = it; reload() } }
-    }
-
-    fun reload() {
-        job?.cancel()
-        job = viewModelScope.launch {
-            val current = _ui.value.path
-            _ui.update { it.copy(loading = true) }
-            val r = repo.list(current, cfg.showHidden, cfg.sortBy, cfg.sortAsc)
-            _ui.update { s ->
-                r.fold(
-                    onSuccess = { s.copy(items = it, loading = false, error = false) },
-                    onFailure = { s.copy(items = emptyList(), loading = false, error = true) },
-                )
+        viewModelScope.launch {
+            val s = settings.flow.first()
+            val navPath = handle.get<String>("path")?.takeIf { it.isNotBlank() }
+            var paths = s.tabs.filter { File(it).isDirectory }.ifEmpty { listOf(rootPath) }
+            var idx = s.tabIndex.coerceIn(0, paths.lastIndex)
+            if (navPath != null) {
+                val existing = paths.indexOf(navPath)
+                if (existing >= 0) idx = existing else { paths = paths + navPath; idx = paths.lastIndex }
             }
+            _tabs.value = TabsUi(paths, idx)
+            pane.start(paths[idx], s.showHidden, s.sortBy, s.sortAsc)
+            started = true
+            settings.flow.map { Triple(it.showHidden, it.sortBy, it.sortAsc) }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { pane.configure(it.first, it.second, it.third) }
         }
+        viewModelScope.launch {
+            pane.ui.map { it.path }.distinctUntilChanged().collect { p -> if (started) onPathChanged(p) }
+        }
+        viewModelScope.launch { tasks.version.drop(1).collect { pane.reload() } }
     }
 
-    fun atRoot(path: String = _ui.value.path) = path == rootPath || File(path).parentFile == null
-
-    fun open(path: String) {
-        _ui.update { it.copy(path = path, selection = emptySet()) }
-        reload()
+    // ---- tabs --------------------------------------------------------------------------------
+    private fun onPathChanged(p: String) {
+        val t = _tabs.value
+        if (t.paths.getOrNull(t.index) == p) return
+        val l = t.paths.toMutableList()
+        l[t.index] = p
+        _tabs.value = t.copy(paths = l)
+        persistTabs()
     }
 
-    fun up() {
-        val parent = File(_ui.value.path).parentFile ?: return
-        open(parent.absolutePath)
+    private fun persistTabs() {
+        val t = _tabs.value
+        viewModelScope.launch { settings.setTabs(t.paths, t.index) }
     }
 
-    // ---- selection ----------------------------------------------------------------------
-    fun toggleSelect(path: String) = _ui.update {
-        it.copy(selection = if (path in it.selection) it.selection - path else it.selection + path)
-    }
-    fun clearSelection() = _ui.update { it.copy(selection = emptySet()) }
-    fun selectAll() = _ui.update { s -> s.copy(selection = s.items.map { it.path }.toSet()) }
-    fun invertSelection() = _ui.update { s ->
-        s.copy(selection = s.items.map { it.path }.toSet() - s.selection)
+    fun newTab() {
+        val l = _tabs.value.paths + pane.ui.value.path
+        _tabs.value = TabsUi(l, l.lastIndex)
+        persistTabs()
     }
 
-    fun messageShown() = _ui.update { it.copy(message = null) }
-    fun notify(@StringRes id: Int) = _ui.update { it.copy(message = id) }
+    fun switchTab(i: Int) {
+        val t = _tabs.value
+        if (i !in t.paths.indices || i == t.index) return
+        _tabs.value = t.copy(index = i)
+        pane.open(t.paths[i])
+        persistTabs()
+    }
 
-    // ---- file operations ----------------------------------------------------------------
+    fun closeTab(i: Int) {
+        val t = _tabs.value
+        if (t.paths.size <= 1 || i !in t.paths.indices) return
+        val l = t.paths.toMutableList().also { it.removeAt(i) }
+        val newIdx = when {
+            i < t.index -> t.index - 1
+            i == t.index -> minOf(i, l.lastIndex)
+            else -> t.index
+        }
+        _tabs.value = TabsUi(l, newIdx)
+        if (i == t.index) pane.open(l[newIdx])
+        persistTabs()
+    }
+
+    // ---- messages ----------------------------------------------------------------------------
+    fun messageShown() { _message.value = null }
+    fun notify(@StringRes id: Int) { _message.value = id }
+
     private fun errRes(e: Throwable): Int = when ((e as? FileOpException)?.kind) {
         FileOpException.Kind.EXISTS -> R.string.msg_exists
         FileOpException.Kind.INVALID -> R.string.msg_invalid_name
@@ -108,32 +136,62 @@ class BrowserViewModel @Inject constructor(
     private fun run(@StringRes okMsg: Int, block: suspend () -> Result<Unit>) {
         viewModelScope.launch {
             block().fold(
-                onSuccess = { _ui.update { it.copy(message = okMsg, selection = emptySet()) }; reload() },
-                onFailure = { e -> _ui.update { it.copy(message = errRes(e)) }; reload() },
+                onSuccess = { _message.value = okMsg; pane.clearSelection() },
+                onFailure = { e -> _message.value = errRes(e) },
             )
+            pane.reload()
         }
     }
 
-    fun createFolder(name: String) = run(R.string.msg_created) { repo.createFolder(_ui.value.path, name) }
-    fun createFile(name: String) = run(R.string.msg_created) { repo.createFile(_ui.value.path, name) }
+    // ---- file operations -----------------------------------------------------------------------
+    fun createFolder(name: String) = run(R.string.msg_created) { repo.createFolder(pane.ui.value.path, name) }
+    fun createFile(name: String) = run(R.string.msg_created) { repo.createFile(pane.ui.value.path, name) }
     fun renameSelected(newName: String) {
-        val p = _ui.value.selection.singleOrNull() ?: return
+        val p = pane.ui.value.selection.singleOrNull() ?: return
         run(R.string.msg_renamed) { repo.rename(p, newName) }
     }
     fun deleteSelected() {
-        val paths = _ui.value.selection.toList()
+        val paths = pane.ui.value.selection.toList()
         run(R.string.msg_deleted) { repo.delete(paths) }
     }
 
+    fun copySelection(cut: Boolean) {
+        val sel = pane.ui.value.selection.toList()
+        if (sel.isEmpty()) return
+        tasks.setClip(sel, cut)
+        pane.clearSelection()
+        _message.value = if (cut) R.string.msg_clip_cut else R.string.msg_clip_copy
+    }
+
+    fun paste() = tasks.requestPaste(pane.ui.value.path)
+
+    fun zipSelected() {
+        val sel = pane.ui.value.selection.toList()
+        if (sel.isEmpty()) return
+        val dir = File(pane.ui.value.path)
+        val base = if (sel.size == 1) File(sel[0]).name.substringBeforeLast('.', File(sel[0]).name) + ".zip" else "archive.zip"
+        tasks.zip(sel, File(dir, uniqueName(dir, base)))
+        pane.clearSelection()
+    }
+
+    fun unzipSelected() {
+        val zip = pane.ui.value.selection.singleOrNull()?.let { File(it) } ?: return
+        val dir = File(pane.ui.value.path)
+        tasks.unzip(zip, File(dir, uniqueName(dir, zip.nameWithoutExtension)))
+        pane.clearSelection()
+    }
+
     fun addSelectionToPanel(panelId: Long) {
-        val chosen = _ui.value.items.filter { it.path in _ui.value.selection }
+        val ui = pane.ui.value
+        val chosen = ui.items.filter { it.path in ui.selection }
         viewModelScope.launch {
             chosen.forEach { f ->
                 if (dao.countItem(panelId, f.path) == 0) {
                     dao.addItem(PanelItemEntity(panelId = panelId, path = f.path, label = f.name, isDir = f.isDir))
                 }
             }
-            _ui.update { it.copy(message = R.string.msg_added, selection = emptySet()) }
+            _message.value = R.string.msg_added
+            pane.clearSelection()
         }
     }
 }

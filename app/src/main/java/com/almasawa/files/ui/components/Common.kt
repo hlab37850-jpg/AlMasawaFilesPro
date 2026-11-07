@@ -86,6 +86,7 @@ fun FileRow(
     selecting: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    subtitle: String? = null,
 ) {
     val ctx = LocalContext.current
     val date = remember(item.modified) { DateFormat.getMediumDateFormat(ctx).format(Date(item.modified)) }
@@ -98,7 +99,7 @@ fun FileRow(
         ),
         leadingContent = { Icon(iconFor(item), contentDescription = null) },
         headlineContent = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { Text(sub, maxLines = 1) },
+        supportingContent = { Text(subtitle ?: sub, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingContent = if (selecting) {
             { Checkbox(checked = selected, onCheckedChange = null) }
         } else null,

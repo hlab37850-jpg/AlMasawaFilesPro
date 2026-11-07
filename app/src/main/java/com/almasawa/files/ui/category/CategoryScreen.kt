@@ -18,7 +18,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -31,7 +30,6 @@ import com.almasawa.files.data.files.FileItem
 import com.almasawa.files.data.files.FileRepository
 import com.almasawa.files.ui.components.FileRow
 import com.almasawa.files.ui.home.categoryLabel
-import com.almasawa.files.util.openFile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,10 +49,8 @@ class CategoryViewModel @Inject constructor(handle: SavedStateHandle, repo: File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CategoryScreen(onBack: () -> Unit, vm: CategoryViewModel = hiltViewModel()) {
+fun CategoryScreen(onBack: () -> Unit, onOpenFile: (String) -> Unit, vm: CategoryViewModel = hiltViewModel()) {
     val loaded by vm.items.collectAsStateWithLifecycle()
-    val ctx = LocalContext.current
-    val noApp = stringResource(R.string.msg_no_app)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -72,9 +68,7 @@ fun CategoryScreen(onBack: () -> Unit, vm: CategoryViewModel = hiltViewModel()) 
                 list.isEmpty() -> Text(stringResource(R.string.empty_folder), modifier = Modifier.align(Alignment.Center))
                 else -> LazyColumn {
                     items(list, key = { it.path }) { f ->
-                        FileRow(f, selected = false, selecting = false, onClick = {
-                            if (!openFile(ctx, f.path)) android.widget.Toast.makeText(ctx, noApp, android.widget.Toast.LENGTH_SHORT).show()
-                        }, onLongClick = {})
+                        FileRow(f, selected = false, selecting = false, onClick = { onOpenFile(f.path) }, onLongClick = {})
                     }
                 }
             }

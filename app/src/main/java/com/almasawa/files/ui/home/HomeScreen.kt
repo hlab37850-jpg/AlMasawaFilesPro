@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -58,9 +59,13 @@ private fun categoryIcon(c: Category): ImageVector = when (c) {
 fun HomeScreen(
     onOpenFolder: (String) -> Unit,
     onOpenCategory: (Category) -> Unit,
+    onOpenFile: (String) -> Unit,
+    onSearch: (String) -> Unit,
+    onOpenDual: () -> Unit,
     vm: HomeViewModel = hiltViewModel(),
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val dual by vm.dualPane.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
 
@@ -72,6 +77,22 @@ fun HomeScreen(
             Column(Modifier.padding(top = 24.dp)) {
                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall)
                 Text(stringResource(R.string.tagline), color = MaterialTheme.colorScheme.secondary)
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onSearch(vm.rootPath) }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Search, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.home_search))
+                }
+                if (dual) {
+                    OutlinedButton(onClick = onOpenDual, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.VerticalSplit, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.home_dual))
+                    }
+                }
             }
         }
         item {
@@ -121,7 +142,7 @@ fun HomeScreen(
         if (ui.recent.isNotEmpty()) {
             item { Text(stringResource(R.string.home_recent), style = MaterialTheme.typography.titleMedium) }
             items(ui.recent, key = { it.path }) { f ->
-                FileRow(f, selected = false, selecting = false, onClick = { openFile(ctx, f.path) }, onLongClick = {})
+                FileRow(f, selected = false, selecting = false, onClick = { onOpenFile(f.path) }, onLongClick = {})
             }
         }
     }

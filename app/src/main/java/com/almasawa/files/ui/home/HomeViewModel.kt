@@ -7,7 +7,11 @@ import com.almasawa.files.data.files.CategoryStat
 import com.almasawa.files.data.files.FileItem
 import com.almasawa.files.data.files.FileRepository
 import com.almasawa.files.data.files.StorageInfo
+import com.almasawa.files.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +26,13 @@ data class HomeUi(
 )
 
 @HiltViewModel
-class HomeViewModel @Inject constructor(private val repo: FileRepository) : ViewModel() {
+class HomeViewModel @Inject constructor(
+    private val repo: FileRepository,
+    settings: SettingsRepository,
+) : ViewModel() {
+    val dualPane: StateFlow<Boolean> =
+        settings.flow.map { it.dualPane }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     val rootPath: String = repo.root.absolutePath
     private val _ui = MutableStateFlow(HomeUi())
     val ui: StateFlow<HomeUi> = _ui.asStateFlow()

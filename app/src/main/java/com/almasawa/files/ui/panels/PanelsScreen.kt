@@ -67,7 +67,7 @@ import android.widget.Toast
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PanelsScreen(onOpenFolder: (String) -> Unit, vm: PanelsViewModel = hiltViewModel()) {
+fun PanelsScreen(onOpenFolder: (String) -> Unit, onOpenFile: (String) -> Unit, vm: PanelsViewModel = hiltViewModel()) {
     val panels by vm.panels.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     var showHidden by remember { mutableStateOf(false) }
@@ -112,8 +112,7 @@ fun PanelsScreen(onOpenFolder: (String) -> Unit, vm: PanelsViewModel = hiltViewM
                         PanelCard(
                             p,
                             onOpen = { item ->
-                                if (item.isDir) onOpenFolder(item.path)
-                                else if (!openFile(ctx, item.path)) Toast.makeText(ctx, noApp, Toast.LENGTH_SHORT).show()
+                                if (item.isDir) onOpenFolder(item.path) else onOpenFile(item.path)
                             },
                             onEdit = { editing = p.panel },
                             onTogglePin = { vm.update(p.panel.copy(pinned = !p.panel.pinned)) },
